@@ -17,6 +17,142 @@ from xml.etree.cElementTree import iterparse
 # mzXML parsing
 import pyopenms as po
 
+
+class psmtsv:
+	relevant_psm_columns = ["Spectrum",
+							"Peptide",
+							"Charge",
+							"Retention",
+							"Delta Mass",
+							"Assigned Modifications",
+							# "Observed Modifications",
+							"Hyperscore",
+							"Nextscore",
+							"Expectation",
+							"PeptideProphet Probability",
+							"Ion Mobility",
+							"Protein",
+							"Protein ID",
+							"Gene",
+							"Mapped Proteins",
+							"Mapped Genes",
+							]
+
+	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff):
+		self.psmtsv_file = psmtsv_file
+		self.base_name = base_name
+		self.psms = self.parse_psmtsv()
+		self.exclude_range = exclude_range
+		self.enable_unannotated = enable_unannotated
+		self.enable_massdiff = enable_massdiff
+		# todo
+		# self.match_unimod(unimod)
+
+	def get(self):
+		return(self.psms)
+
+	def parse_psmtsv(self):
+		# read relevant PSM table columns, allowing that some may not be present
+		psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t', usecols=lambda col: col in set(psmtsv.relevant_psm_columns))
+		# psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t')		# all columns
+
+		# spectrum_info = psmtsv_df['Spectrum'].split('.')
+		# base_name = spectrum_info[0]
+
+		# only proceed if base_name matches
+		# if base_name == self.base_name:
+
+		# find decoy prefix
+		decoy_prefix = "rev_"
+		psms = psms.apply(self.parse_spectrum, axis=1)
+		psms = psms.rename(columns={'Charge': 'precursor_charge',
+									'Retention': 'retention_time',
+									'Delta Mass': 'massdiff',
+									'Peptide': 'peptide_sequence',
+									'Ion Mobility': 'ion_mobility',
+									'Hyperscore': 'var_hyperscore',
+									'Nextscore': 'var_nextscore',
+									'Expectation': 'var_expect',
+									'PeptideProphet Probability': 'pep'
+									})
+		psms['hit_rank'] = 1
+		psms = psms.apply(self.parse_assigned_modifications, axis=1)
+		psms = psms.apply(self.parse_protein_and_gene, axis=1, args=(decoy_prefix, ))
+		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
+		return psms
+
+	def parse_spectrum(self, psm_series):
+		splits = psm_series['Spectrum'].split('.')
+		psm_series['run_id'] = splits[0]
+		psm_series['scan_id'] = int(splits[1])
+		return psm_series
+
+	def parse_assigned_modifications(self, psm_series):
+		"""
+		Parse the Assigned Modifications column of a psm.tsv table to easyPQP mods.
+		Usage: psm_df = psm_df.apply(method, axis=1), where psm_df is the input PSMs dataframe
+		Adds the required modification columns to the dataframe
+		"""
+		modifications = "M"
+		nterm_modification = ""
+		cterm_modification = ""
+		if pd.notnull(psm_series['Assigned Modifications']):
+			mods = psm_series['Assigned Modifications'].split(',')
+			for mod in mods:
+				match = re.search(r"\((\d+\.\d+)\)", mod)
+				if match:
+					mass = match.group(1)
+				else:
+					click.echo(
+						"Error: invalid modification {} in spectrum {} was ignored".format(mod, psm_series['Spectrum']))
+					continue
+
+				if 'N-term' in mod:
+					nterm_modification = float(mass)
+				elif 'C-term' in mod:
+					cterm_modification = float(mass)
+				else:
+					# regular mod
+					splits = mod.split('(')
+					location = re.search(r"(\d+)", splits[0]).group(1)
+					modifications += '|{}${}'.format(location, mass)
+		psm_series['modifications'] = modifications
+		psm_series['nterm_modification'] = nterm_modification
+		psm_series['cterm_modification'] = cterm_modification
+		return psm_series
+
+	def parse_protein_and_gene(self, psm_series, decoy_prefix):
+		"""
+		Parse protein and gene IDs from identified and mapped entries and set total_num_proteins and decoy status.
+		"""
+		psm_series['decoy'] = psm_series['Protein'].startswith(decoy_prefix)
+
+		protein_id = psm_series['Protein ID']
+		gene_id = psm_series['Gene']
+		num_total_proteins = 1
+		uniprot_like_ids = '|' in psm_series['Protein']
+
+		# if mapped proteins/genes not null, capture all entries
+		if pd.notnull(psm_series['Mapped Proteins']):
+			splits = psm_series['Mapped Proteins'].split(',')
+			for split in splits:
+				num_total_proteins += 1
+				# If UniProt-like IDs, take ID portion only. Otherwise, use whole ID
+				if uniprot_like_ids:
+					uniprot_splits = split.split('|')
+					protein_id += ';{}'.format(uniprot_splits[1])
+				else:
+					protein_id += ';{}'.format(split)
+		if pd.notnull(psm_series['Mapped Genes']):
+			splits = psm_series['Mapped Genes'].split(',')
+			for split in splits:
+				gene_id += ';{}'.format(split)
+
+		psm_series['protein_id'] = protein_id
+		psm_series['gene_id'] = gene_id
+		return psm_series
+
+
 class pepxml:
 	def __init__(self, pepxml_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff):
 		self.pepxml_file = pepxml_file
@@ -719,6 +855,30 @@ class MSCallback:
 	def consumeSpectrum(self, s):
 		self.id_peaks_map.append((s.getNativeID(), s.get_peaks()))
 
+def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses):
+	"""
+	Parsing method with psm.tsv as the primary input instead of pepxml/idxml
+	"""
+	psmslist = []
+	for psmfile in psm_file_list:
+		px = psmtsv(psmfile, um, base_name, exclude_range, enable_unannotated, enable_massdiff)
+		psms = px.get()
+		rank = re.compile(r'_rank([0-9]+)\.').search(pathlib.Path(psmfile).name)
+		rank_str = '' if rank is None else '_rank' + rank.group(1)
+		psms['group_id'] = psms['run_id'] + "_" + psms['scan_id'].astype(str) + rank_str
+		click.echo(f"Info: Done parsing psm.tsv: {psmfile}")
+		psmslist.append(psms)
+	psms = pd.concat(psmslist)
+	theoretical = None
+	if psms.shape[0] > 0:
+		# Generate theoretical spectra
+		click.echo("Info: Generate theoretical spectra.")
+		theoretical = {}
+		for modified_peptide, precursor_charge in psms[['modified_peptide','precursor_charge']].drop_duplicates().itertuples(index=False):
+			theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+	return psms, theoretical
+
+
 def get_map_mzml_or_mzxml(path: str, filetype):
 	assert filetype in ('mzml', 'mzxml')
 	fh = po.MzMLFile() if filetype=='mzml' else po.MzXMLFile()
@@ -763,6 +923,62 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 		return psms, peaks
 	else:
 		return pd.DataFrame({'run_id': [], 'scan_id': [], 'hit_rank': [], 'massdiff': [], 'precursor_charge': [], 'retention_time': [], 'ion_mobility': [], 'peptide_sequence': [], 'modifications': [], 'nterm_modification': [], 'cterm_modification': [], 'protein_id': [], 'gene_id': [], 'num_tot_proteins': [], 'decoy': []}), pd.DataFrame({'scan_id': [], 'modified_peptide': [], 'precursor_charge': [], 'precursor_mz': [], 'fragment': [], 'product_mz': [], 'intensity': []})
+
+
+def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep):
+	# Parse basename
+	base_name = basename_spectralfile(spectralfile)
+	click.echo("Info: Parsing run %s." % base_name)
+
+	# Initialize UniMod
+	um = unimod(unimodfile, max_delta_unimod)
+	import concurrent.futures
+
+	exe = concurrent.futures.ProcessPoolExecutor(1)
+	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+	time.sleep(1)  # allow the process to execute first before using pyOpenMS to read files
+	if spectralfile.lower().endswith(".mzxml"):
+		input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
+	elif spectralfile.casefold().endswith(".mzml"):
+		input_map = get_map_mzml_or_mzxml(spectralfile, 'mzml')
+	else:
+		input_map = None
+
+
+	# if spectralfile.lower().endswith(".mzxml"):
+	# 	input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
+	# elif spectralfile.casefold().endswith(".mzml"):
+	# 	input_map = get_map_mzml_or_mzxml(spectralfile, 'mzml')
+
+	# Continue if any PSMS are present
+	psms, theoretical = psms_fut.result()
+	exe.shutdown()
+	if psms.shape[0] > 0:
+		run_id = basename_spectralfile(spectralfile)
+
+		# Generate theoretical spectra
+		# click.echo("Info: Generate theoretical spectra.")
+		# theoretical = {}
+		# for modified_peptide, precursor_charge in psms[['modified_peptide','precursor_charge']].drop_duplicates().itertuples(index=False):
+		# 	theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+
+		# Generate spectrum dataframe
+		click.echo("Info: Processing spectra from file %s." % spectralfile)
+		psms = psms[psms['pep'] <= max_psm_pep]
+		if spectralfile.lower().endswith(".mzxml"):
+			peaks = read_mzml_or_mzxml_impl(input_map, psms[['scan_id','modified_peptide','precursor_charge']], theoretical, max_delta_ppm, 'mzxml')
+		elif spectralfile.casefold().endswith(".mzml"):
+			peaks = read_mzml_or_mzxml_impl(input_map, psms[['scan_id', 'modified_peptide', 'precursor_charge']], theoretical, max_delta_ppm, 'mzml')
+		elif spectralfile.lower().endswith(".mgf"):
+			peaks = read_mgf(spectralfile, psms[['scan_id', 'modified_peptide', 'precursor_charge']], theoretical, max_delta_ppm)
+
+		# Round floating numbers
+		peaks = peaks.round(6)
+
+		return psms, peaks
+	else:
+		return pd.DataFrame({'run_id': [], 'scan_id': [], 'hit_rank': [], 'massdiff': [], 'precursor_charge': [], 'retention_time': [], 'ion_mobility': [], 'peptide_sequence': [], 'modifications': [], 'nterm_modification': [], 'cterm_modification': [], 'protein_id': [], 'gene_id': [], 'num_tot_proteins': [], 'decoy': []}), pd.DataFrame({'scan_id': [], 'modified_peptide': [], 'precursor_charge': [], 'precursor_mz': [], 'fragment': [], 'product_mz': [], 'intensity': []})
+
 
 def basename_spectralfile(spectralfile):
 	'''
