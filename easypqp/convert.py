@@ -76,8 +76,6 @@ class psmtsv:
 		not matching the easyPQP Unimod database and causing crashes. Reports mods in the [mass] format in the peptide string.
 		"""
 		def match_modifications(peptide, um):
-			monomeric_masses = {"A": 71.03711, "R": 156.10111, "N": 114.04293, "D": 115.02694, "C": 103.00919, "E": 129.04259, "Q": 128.05858, "G": 57.02146, "H": 137.05891, "I": 113.08406, "L": 113.08406, "K": 128.09496, "M": 131.04049, "F": 147.06841, "P": 97.05276, "S": 87.03203, "T": 101.04768, "W": 186.07931, "Y": 163.06333, "V": 99.06841,
-								'U': 150.95363, 'O': 237.14773}
 			modified_peptide = peptide['peptide_sequence']
 
 			# parse terminal modifications
@@ -183,7 +181,10 @@ class psmtsv:
 		psm_series['decoy'] = psm_series['Protein'].startswith(decoy_prefix)
 
 		protein_id = psm_series['Protein ID']
-		gene_id = psm_series['Gene']
+		if pd.notnull(psm_series['Gene']):
+			gene_id = psm_series['Gene']
+		else:
+			gene_id = ''		# contaminants may have empty Gene entry. Ensure string format
 		num_total_proteins = 1
 		uniprot_like_ids = '|' in psm_series['Protein']
 
@@ -983,6 +984,7 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix):
 	# Parse basename
 	base_name = basename_spectralfile(spectralfile)
+	start = time.time()
 	click.echo("Info: Parsing run %s." % base_name)
 
 	# Initialize UniMod
@@ -999,23 +1001,13 @@ def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_d
 	else:
 		input_map = None
 
-
-	# if spectralfile.lower().endswith(".mzxml"):
-	# 	input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
-	# elif spectralfile.casefold().endswith(".mzml"):
-	# 	input_map = get_map_mzml_or_mzxml(spectralfile, 'mzml')
-
 	# Continue if any PSMS are present
 	psms, theoretical = psms_fut.result()
 	exe.shutdown()
+
+	click.echo("Info: parsed psms from {} in {:.1f}.".format(psm_file_list, time.time() - start))
 	if psms.shape[0] > 0:
 		run_id = basename_spectralfile(spectralfile)
-
-		# Generate theoretical spectra
-		# click.echo("Info: Generate theoretical spectra.")
-		# theoretical = {}
-		# for modified_peptide, precursor_charge in psms[['modified_peptide','precursor_charge']].drop_duplicates().itertuples(index=False):
-		# 	theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
 
 		# Generate spectrum dataframe
 		click.echo("Info: Processing spectra from file %s." % spectralfile)
