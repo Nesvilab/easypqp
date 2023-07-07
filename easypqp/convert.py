@@ -46,7 +46,7 @@ class psmtsv:
 		self.exclude_range = exclude_range
 		self.enable_unannotated = enable_unannotated
 		self.enable_massdiff = enable_massdiff
-		self.match_unimod(unimod)
+		self.handle_mods(unimod)
 
 	def get(self):
 		return(self.psms)
@@ -72,6 +72,63 @@ class psmtsv:
 		psms = psms.apply(self.parse_protein_and_gene, axis=1, args=(self.decoy_prefix, ))
 		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
+
+	def handle_mods(self, unimod):
+		"""
+		Does not attempt to match Unimod (except for open search results) due to issues with pyOpenMS's Unimod database
+		not matching the easyPQP Unimod database and causing crashes. Reports mods in the [mass] format in the peptide string.
+		"""
+		def match_modifications(peptide, um):
+			monomeric_masses = {"A": 71.03711, "R": 156.10111, "N": 114.04293, "D": 115.02694, "C": 103.00919, "E": 129.04259, "Q": 128.05858, "G": 57.02146, "H": 137.05891, "I": 113.08406, "L": 113.08406, "K": 128.09496, "M": 131.04049, "F": 147.06841, "P": 97.05276, "S": 87.03203, "T": 101.04768, "W": 186.07931, "Y": 163.06333, "V": 99.06841,
+								'U': 150.95363, 'O': 237.14773}
+			modified_peptide = peptide['peptide_sequence']
+
+			# parse terminal modifications
+			nterm_modification = ""
+			if peptide['nterm_modification'] != '':
+				nterm_modification = peptide['nterm_modification'] - 1.0078
+			cterm_modification = ""
+			if peptide['cterm_modification'] != '':
+				cterm_modification = peptide['cterm_modification'] - 18.0153
+
+			# parse closed modifications
+			modifications = {}
+			if "M|" in peptide['modifications']:
+				for modification in peptide['modifications'].split('|')[1:]:
+					site, mass = modification.split('$')
+					delta_mass = float(mass)		# psm.tsv mod masses are just the mod, does not include residue mass
+					modifications[int(site)] = delta_mass
+
+			massdiff = float(peptide['massdiff'])
+			if self.enable_massdiff and (massdiff < self.exclude_range[0] or massdiff > self.exclude_range[1]):
+				# parse open modifications
+				oms_sequence = peptide['peptide_sequence']
+				for site in modifications.keys():
+					oms_sequence = oms_sequence[:site-1] + "_" + oms_sequence[site:]
+
+				oms_modifications, nterm_modification, cterm_modification = um.get_oms_id(oms_sequence, peptide['massdiff'], nterm_modification, cterm_modification)
+				modifications = {**modifications, **oms_modifications}
+
+			for site in sorted(modifications, reverse=True):
+				# modified_peptide = "[" + str(round(modifications[site], 6)) + "]" + modified_peptide
+				modified_peptide = modified_peptide[:site] + "[" + str(round(modifications[site], 6)) + "]" + modified_peptide[site:]
+
+			if nterm_modification != '':
+				if self.enable_unannotated:
+					modified_peptide = f'.[{round(nterm_modification, 6)}]{modified_peptide}'
+				else:
+					raise click.ClickException("Error: Could not annotate N-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], nterm_modification))
+
+			if cterm_modification != '':
+				if self.enable_unannotated:
+					modified_peptide = f'{modified_peptide}.[{round(cterm_modification, 6)}]'
+				else:
+					raise click.ClickException("Error: Could not annotate C-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], cterm_modification))
+
+			return modified_peptide
+
+		if self.psms.shape[0] > 0:
+			self.psms['modified_peptide'] = self.psms[['peptide_sequence','modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod), axis=1)
 
 	def parse_spectrum(self, psm_series):
 		splits = psm_series['Spectrum'].split('.')
