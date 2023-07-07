@@ -55,8 +55,7 @@ class psmtsv:
 		# read relevant PSM table columns
 		psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t', usecols=lambda col: col in set(psmtsv.relevant_psm_columns))
 
-		# find decoy prefix
-		psms = psms.apply(self.parse_spectrum, axis=1)
+		psms = psms.apply(self.parse_psm_info, axis=1)
 		psms = psms.rename(columns={'Charge': 'precursor_charge',
 									'Retention': 'retention_time',
 									'Delta Mass': 'massdiff',
@@ -68,8 +67,6 @@ class psmtsv:
 									'PeptideProphet Probability': 'pep'
 									})
 		psms['hit_rank'] = 1
-		psms = psms.apply(self.parse_assigned_modifications, axis=1)
-		psms = psms.apply(self.parse_protein_and_gene, axis=1, args=(self.decoy_prefix, ))
 		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
 
@@ -129,6 +126,15 @@ class psmtsv:
 
 		if self.psms.shape[0] > 0:
 			self.psms['modified_peptide'] = self.psms[['peptide_sequence','modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod), axis=1)
+
+	def parse_psm_info(self, psm_series):
+		"""
+		Perform parsing operations on a PSM entry
+		"""
+		psm_series = self.parse_spectrum(psm_series)
+		psm_series = self.parse_assigned_modifications(psm_series)
+		psm_series = self.parse_protein_and_gene(psm_series, self.decoy_prefix)
+		return psm_series
 
 	def parse_spectrum(self, psm_series):
 		splits = psm_series['Spectrum'].split('.')
