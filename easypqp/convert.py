@@ -38,32 +38,24 @@ class psmtsv:
 							"Mapped Genes",
 							]
 
-	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff):
+	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff, decoy_prefix):
 		self.psmtsv_file = psmtsv_file
 		self.base_name = base_name
+		self.decoy_prefix = decoy_prefix
 		self.psms = self.parse_psmtsv()
 		self.exclude_range = exclude_range
 		self.enable_unannotated = enable_unannotated
 		self.enable_massdiff = enable_massdiff
-		# todo
-		# self.match_unimod(unimod)
+		self.match_unimod(unimod)
 
 	def get(self):
 		return(self.psms)
 
 	def parse_psmtsv(self):
-		# read relevant PSM table columns, allowing that some may not be present
+		# read relevant PSM table columns
 		psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t', usecols=lambda col: col in set(psmtsv.relevant_psm_columns))
-		# psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t')		# all columns
-
-		# spectrum_info = psmtsv_df['Spectrum'].split('.')
-		# base_name = spectrum_info[0]
-
-		# only proceed if base_name matches
-		# if base_name == self.base_name:
 
 		# find decoy prefix
-		decoy_prefix = "rev_"
 		psms = psms.apply(self.parse_spectrum, axis=1)
 		psms = psms.rename(columns={'Charge': 'precursor_charge',
 									'Retention': 'retention_time',
@@ -77,7 +69,7 @@ class psmtsv:
 									})
 		psms['hit_rank'] = 1
 		psms = psms.apply(self.parse_assigned_modifications, axis=1)
-		psms = psms.apply(self.parse_protein_and_gene, axis=1, args=(decoy_prefix, ))
+		psms = psms.apply(self.parse_protein_and_gene, axis=1, args=(self.decoy_prefix, ))
 		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
 
@@ -855,13 +847,13 @@ class MSCallback:
 	def consumeSpectrum(self, s):
 		self.id_peaks_map.append((s.getNativeID(), s.get_peaks()))
 
-def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses):
+def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix):
 	"""
 	Parsing method with psm.tsv as the primary input instead of pepxml/idxml
 	"""
 	psmslist = []
 	for psmfile in psm_file_list:
-		px = psmtsv(psmfile, um, base_name, exclude_range, enable_unannotated, enable_massdiff)
+		px = psmtsv(psmfile, um, base_name, exclude_range, enable_unannotated, enable_massdiff, decoy_prefix)
 		psms = px.get()
 		rank = re.compile(r'_rank([0-9]+)\.').search(pathlib.Path(psmfile).name)
 		rank_str = '' if rank is None else '_rank' + rank.group(1)
@@ -925,7 +917,7 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 		return pd.DataFrame({'run_id': [], 'scan_id': [], 'hit_rank': [], 'massdiff': [], 'precursor_charge': [], 'retention_time': [], 'ion_mobility': [], 'peptide_sequence': [], 'modifications': [], 'nterm_modification': [], 'cterm_modification': [], 'protein_id': [], 'gene_id': [], 'num_tot_proteins': [], 'decoy': []}), pd.DataFrame({'scan_id': [], 'modified_peptide': [], 'precursor_charge': [], 'precursor_mz': [], 'fragment': [], 'product_mz': [], 'intensity': []})
 
 
-def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep):
+def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix):
 	# Parse basename
 	base_name = basename_spectralfile(spectralfile)
 	click.echo("Info: Parsing run %s." % base_name)
@@ -935,7 +927,7 @@ def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_d
 	import concurrent.futures
 
 	exe = concurrent.futures.ProcessPoolExecutor(1)
-	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix)
 	time.sleep(1)  # allow the process to execute first before using pyOpenMS to read files
 	if spectralfile.lower().endswith(".mzxml"):
 		input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
