@@ -78,15 +78,20 @@ class psmtsv:
 		not matching the easyPQP Unimod database and causing crashes. Reports mods in the [mass] format in the peptide string.
 		"""
 		def match_modifications(peptide, um):
+			monomeric_masses = {"A": 71.03711, "R": 156.10111, "N": 114.04293, "D": 115.02694, "C": 103.00919,
+								"E": 129.04259, "Q": 128.05858, "G": 57.02146, "H": 137.05891, "I": 113.08406,
+								"L": 113.08406, "K": 128.09496, "M": 131.04049, "F": 147.06841, "P": 97.05276,
+								"S": 87.03203, "T": 101.04768, "W": 186.07931, "Y": 163.06333, "V": 99.06841,
+								'U': 150.95363, 'O': 237.14773}
 			modified_peptide = peptide['peptide_sequence']
 
 			# parse terminal modifications
 			nterm_modification = ""
 			if peptide['nterm_modification'] != '':
-				nterm_modification = peptide['nterm_modification']
+				nterm_modification = peptide['nterm_modification'] - 1.0078
 			cterm_modification = ""
 			if peptide['cterm_modification'] != '':
-				cterm_modification = peptide['cterm_modification']
+				cterm_modification = peptide['cterm_modification'] - 18.0153
 
 			# parse closed modifications
 			modifications = {}
@@ -94,7 +99,7 @@ class psmtsv:
 				for modification in peptide['modifications'].split('|')[1:]:
 					site, mass = modification.split('$')
 					delta_mass = float(mass)		# psm.tsv mod masses are just the mod, does not include residue mass
-					modifications[int(site)] = delta_mass
+					modifications[int(site)] = delta_mass + monomeric_masses[peptide['peptide_sequence'][int(site)-1]]
 
 			massdiff = float(peptide['massdiff'])
 			if self.enable_massdiff and (massdiff < self.exclude_range[0] or massdiff > self.exclude_range[1]):
