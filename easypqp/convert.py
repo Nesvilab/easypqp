@@ -77,7 +77,7 @@ class psmtsv:
 		Does not attempt to match Unimod (except for open search results) due to issues with pyOpenMS's Unimod database
 		not matching the easyPQP Unimod database and causing crashes. Reports mods in the [mass] format in the peptide string.
 		"""
-		def match_modifications(peptide, um):
+		def match_modifications(peptide, um, modified_peptide_attribute):
 			monomeric_masses = {"A": 71.03711, "R": 156.10111, "N": 114.04293, "D": 115.02694, "C": 103.00919,
 								"E": 129.04259, "Q": 128.05858, "G": 57.02146, "H": 137.05891, "I": 113.08406,
 								"L": 113.08406, "K": 128.09496, "M": 131.04049, "F": 147.06841, "P": 97.05276,
@@ -95,8 +95,8 @@ class psmtsv:
 
 			# parse closed modifications
 			modifications = {}
-			if "M|" in peptide['modifications']:
-				for modification in peptide['modifications'].split('|')[1:]:
+			if "M|" in peptide[modified_peptide_attribute]:
+				for modification in peptide[modified_peptide_attribute].split('|')[1:]:
 					site, mass = modification.split('$')
 					delta_mass = float(mass)		# psm.tsv mod masses are just the mod, does not include residue mass
 					modifications[int(site)] = delta_mass + monomeric_masses[peptide['peptide_sequence'][int(site)-1]]
@@ -130,7 +130,8 @@ class psmtsv:
 			return modified_peptide
 
 		if self.psms.shape[0] > 0:
-			self.psms['modified_peptide'] = self.psms[['peptide_sequence','modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod), axis=1)
+			self.psms['modified_peptide'] = self.psms[['peptide_sequence','modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod, 'modifications'), axis=1)
+			self.psms['labile_modified_peptide'] = self.psms[['peptide_sequence','nonlabile_modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod, 'nonlabile_modifications'), axis=1)
 
 	def parse_psm_info(self, psm_series):
 		"""
@@ -147,13 +148,14 @@ class psmtsv:
 		psm_series['scan_id'] = int(splits[1])
 		return psm_series
 
-	def parse_assigned_modifications(self, psm_series):
+	def parse_assigned_modifications(self, psm_series, check_labile=True):
 		"""
 		Parse the Assigned Modifications column of a psm.tsv table to easyPQP mods.
 		Usage: psm_df = psm_df.apply(method, axis=1), where psm_df is the input PSMs dataframe
 		Adds the required modification columns to the dataframe
 		"""
 		modifications = "M"
+		nonlabile_modifications = "M"
 		nterm_modification = ""
 		cterm_modification = ""
 		if pd.notnull(psm_series['Assigned Modifications']):
@@ -176,7 +178,12 @@ class psmtsv:
 					splits = mod.split('(')
 					location = re.search(r"(\d+)", splits[0]).group(1)
 					modifications += '|{}${}'.format(location, mass)
+					if check_labile:
+						# hard-coding O-glycan rules for now, will change to general implementation later
+						if not(float(mass) > 200 and psm_series['Peptide'][int(location) - 1] in ['S', 'T']):
+							nonlabile_modifications += '|{}${}'.format(location, mass)
 		psm_series['modifications'] = modifications
+		psm_series['nonlabile_modifications'] = nonlabile_modifications
 		psm_series['nterm_modification'] = nterm_modification
 		psm_series['cterm_modification'] = cterm_modification
 		return psm_series
@@ -937,8 +944,8 @@ def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, 
 		# Generate theoretical spectra
 		click.echo("Info: Generate theoretical spectra.")
 		theoretical = {}
-		for modified_peptide, precursor_charge in psms[['modified_peptide','precursor_charge']].drop_duplicates().itertuples(index=False):
-			theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+		for modified_peptide, precursor_charge, labile_peptide in psms[['modified_peptide', 'precursor_charge', 'labile_modified_peptide']].drop_duplicates().itertuples(index=False):
+			theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
 	return psms, theoretical
 
 
