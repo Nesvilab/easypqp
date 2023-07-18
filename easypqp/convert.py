@@ -66,6 +66,8 @@ class psmtsv:
 									'Expectation': 'var_expect',
 									'PeptideProphet Probability': 'pep'
 									})
+		if 'ion_mobility' not in psms:
+			psms['ion_mobility'] = np.nan
 		psms['hit_rank'] = 1
 		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
