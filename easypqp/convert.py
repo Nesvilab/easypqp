@@ -984,12 +984,13 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix):
 	# Parse basename
 	base_name = basename_spectralfile(spectralfile)
-	start = time.time()
-	click.echo("Info: Parsing run %s." % base_name)
+	timestamped_echo("Info: Parsing run %s." % base_name)
 
 	# Initialize UniMod
 	um = unimod(unimodfile, max_delta_unimod)
 	import concurrent.futures
+
+	timestamped_echo("Info: Processing spectra from file %s." % spectralfile)
 
 	exe = concurrent.futures.ProcessPoolExecutor(1)
 	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix)
@@ -1001,14 +1002,13 @@ def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_d
 	else:
 		input_map = None
 
+	timestamped_echo("Info: Loaded %d spectra" % len(input_map))
+
 	# Continue if any PSMS are present
 	psms, theoretical = psms_fut.result()
 	exe.shutdown()
 
-	click.echo("Info: parsed psms from {} in {:.1f}.".format(psm_file_list, time.time() - start))
 	if psms.shape[0] > 0:
-		run_id = basename_spectralfile(spectralfile)
-
 		# Generate spectrum dataframe
 		click.echo("Info: Processing spectra from file %s." % spectralfile)
 		psms = psms[psms['pep'] <= max_psm_pep]
