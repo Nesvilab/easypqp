@@ -113,10 +113,10 @@ def convert(pepxmlfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_r
 @click.option('--fragment_charges', default='[1,2,3,4]', show_default=True, cls=PythonLiteralOption, help='Allowed fragment ion charges.')
 @click.option('--enable_specific_losses/--no-enable_specific_losses', default=False, show_default=True, help='Enable specific fragment ion losses.')
 @click.option('--enable_unspecific_losses/--no-enable_unspecific_losses', default=False, show_default=True, help='Enable unspecific fragment ion losses.')
-@click.option('--max_psm_pep', default=0.5, show_default=True, type=float, help='Maximum posterior error probability (PEP) for a PSM')
+@click.option('--max_psm_pep', default=1, show_default=True, type=float, help='Maximum posterior error probability (PEP) for a PSM')
 @click.option('--decoy_prefix', default='rev_', show_default=True, type=str, required=True, help='Database decoy prefix (required)')
 @click.option('--labile_mods', default=False, show_default=True, required=False, help='Adjust fragment masses of labile modifications (currently O-glycans ONLY)')
-def convert_psm(psm_file, spectralfile, unimodfile, psmsfile, peaksfile, exclude_range_str, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, labile_mods):
+def convertpsm(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_range_str, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, labile_mods):
     """
     Convert psm.tsv files for EasyPQP
     """
@@ -124,10 +124,10 @@ def convert_psm(psm_file, spectralfile, unimodfile, psmsfile, peaksfile, exclude
     start_time = time.time()
 
     psmfile_list = []
-    if psm_file.endswith("psm.tsv"):
-        psmfile_list.append(psm_file)
-    elif psm_file.startswith("[") and psm_file.endswith("]"):
-        psmfile_list = ast.literal_eval(psm_file)
+    if psmfile.endswith("psm.tsv"):
+        psmfile_list.append(psmfile)
+    elif psmfile.startswith("[") and psmfile.endswith("]"):
+        psmfile_list = ast.literal_eval(psmfile)
     else:
         timestamped_echo("Error: Invalid psm file name.")
         return 1
