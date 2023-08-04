@@ -162,7 +162,7 @@ class psmtsv:
 		if pd.notnull(psm_series['Assigned Modifications']):
 			mods = psm_series['Assigned Modifications'].split(',')
 			for mod in mods:
-				match = re.search(r"\((\d+\.\d+)\)", mod)
+				match = re.search(r"\((-?\d+\.\d+)\)", mod)
 				if match:
 					mass = match.group(1)
 				else:
