@@ -47,7 +47,7 @@ class psmtsv:
 		self.exclude_range = exclude_range
 		self.enable_unannotated = enable_unannotated
 		self.enable_massdiff = enable_massdiff
-		self.handle_mods(unimod)
+		self.match_unimod(unimod)
 
 	def get(self):
 		return(self.psms)
@@ -73,10 +73,9 @@ class psmtsv:
 		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
 
-	def handle_mods(self, unimod):
+	def match_unimod(self, unimod):
 		"""
-		Does not attempt to match Unimod (except for open search results) due to issues with pyOpenMS's Unimod database
-		not matching the easyPQP Unimod database and causing crashes. Reports mods in the [mass] format in the peptide string.
+		Match modifications to Unimod as in pepxml. Supports labile modifications
 		"""
 		def match_modifications(peptide, um, modified_peptide_attribute):
 			monomeric_masses = {"A": 71.03711, "R": 156.10111, "N": 114.04293, "D": 115.02694, "C": 103.00919,
@@ -100,7 +99,7 @@ class psmtsv:
 				for modification in peptide[modified_peptide_attribute].split('|')[1:]:
 					site, mass = modification.split('$')
 					delta_mass = float(mass)		# psm.tsv mod masses are just the mod, does not include residue mass
-					modifications[int(site)] = delta_mass + monomeric_masses[peptide['peptide_sequence'][int(site)-1]]
+					modifications[int(site)] = delta_mass
 
 			massdiff = float(peptide['massdiff'])
 			if self.enable_massdiff and (massdiff < self.exclude_range[0] or massdiff > self.exclude_range[1]):
@@ -112,21 +111,55 @@ class psmtsv:
 				oms_modifications, nterm_modification, cterm_modification = um.get_oms_id(oms_sequence, peptide['massdiff'], nterm_modification, cterm_modification)
 				modifications = {**modifications, **oms_modifications}
 
+			peptide_sequence = peptide['peptide_sequence']
+			peptide_length = len(peptide_sequence)
 			for site in sorted(modifications, reverse=True):
-				# modified_peptide = "[" + str(round(modifications[site], 6)) + "]" + modified_peptide
-				modified_peptide = modified_peptide[:site] + "[" + str(round(modifications[site], 6)) + "]" + modified_peptide[site:]
+				positions = ('Anywhere', 'Any N-term', 'Protein N-term') if site == 1 else \
+					('Anywhere', 'Any C-term', 'Protein C-term') if site == peptide_length else \
+						'Anywhere'
+				record_id0 = um.get_id(peptide_sequence[site - 1], positions, modifications[site])
+				if isinstance(record_id0, tuple):
+					record_id, position = record_id0
+				else:
+					record_id = record_id0
+				is_N_term = isinstance(record_id0, tuple) and position in ('Any N-term', 'Protein N-term')
+				if record_id == -1:
+					if self.enable_unannotated:
+						modified_peptide = "[" + str(round(modifications[site], 6)) + "]" + modified_peptide \
+						if is_N_term else \
+						modified_peptide[:site] + "[" + str(round(modifications[site] + monomeric_masses[modified_peptide[site - 1]], 6)) + "]" + modified_peptide[site:]
+					else:
+						raise click.ClickException("Error: Could not annotate site %s (%s) from peptide %s with delta mass %s." % (site, peptide['peptide_sequence'][site-1], peptide['peptide_sequence'], modifications[site]))
+				else:
+					modified_peptide = "(UniMod:" + str(record_id) + ")" + modified_peptide \
+						if is_N_term else \
+						modified_peptide[:site] + "(UniMod:" + str(record_id) + ")" + modified_peptide[site:]
 
 			if nterm_modification != '':
-				if self.enable_unannotated:
-					modified_peptide = f'.[{round(nterm_modification, 6)}]{modified_peptide}'
+				record_id_nterm = um.get_id("N-term", 'Any N-term', nterm_modification)
+				if record_id_nterm == -1:
+					record_id_nterm = um.get_id("N-term", 'Protein N-term', nterm_modification)
+
+				if record_id_nterm == -1:
+					if self.enable_unannotated:
+						modified_peptide = f'.[{round(nterm_modification, 6)}]{modified_peptide}'
+					else:
+						raise click.ClickException("Error: Could not annotate N-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], nterm_modification))
 				else:
-					raise click.ClickException("Error: Could not annotate N-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], nterm_modification))
+					modified_peptide = ".(UniMod:" + str(record_id_nterm) + ")" + modified_peptide
 
 			if cterm_modification != '':
-				if self.enable_unannotated:
-					modified_peptide = f'{modified_peptide}.[{round(cterm_modification, 6)}]'
+				record_id_cterm = um.get_id("C-term", 'Any C-term', cterm_modification)
+				if record_id_cterm == -1:
+					record_id_cterm = um.get_id("C-term", 'Protein C-term', cterm_modification)
+
+				if record_id_cterm == -1:
+					if self.enable_unannotated:
+						modified_peptide = f'{modified_peptide}.[{round(cterm_modification, 6)}]'
+					else:
+						raise click.ClickException("Error: Could not annotate C-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], cterm_modification))
 				else:
-					raise click.ClickException("Error: Could not annotate C-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], cterm_modification))
+					modified_peptide = modified_peptide + ".(UniMod:" + str(record_id_cterm) + ")"
 
 			return modified_peptide
 
