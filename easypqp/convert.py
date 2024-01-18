@@ -20,12 +20,12 @@ import pyopenms as po
 
 class psmtsv:
 	relevant_psm_columns = ["Spectrum",
+							"Spectrum File",
 							"Peptide",
 							"Charge",
 							"Retention",
 							"Delta Mass",
 							"Assigned Modifications",
-							# "Observed Modifications",
 							"Hyperscore",
 							"Nextscore",
 							"Expectation",
@@ -37,6 +37,7 @@ class psmtsv:
 							"Mapped Proteins",
 							"Mapped Genes",
 							]
+	rank_pattern = re.compile(r"_rank([\d]+)\.pep\.xml")
 
 	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff, decoy_prefix, labile_mods):
 		self.psmtsv_file = psmtsv_file
@@ -69,8 +70,9 @@ class psmtsv:
 									})
 		if 'ion_mobility' not in psms:
 			psms['ion_mobility'] = np.nan
-		psms['hit_rank'] = 1
-		psms = psms.drop(columns=['Spectrum', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
+		if 'hit_rank' not in psms:
+			psms['hit_rank'] = 1
+		psms = psms.drop(columns=['Spectrum', 'Spectrum File', 'Assigned Modifications', 'Protein', 'Gene', 'Mapped Proteins', 'Mapped Genes', 'Protein ID'])
 		return psms
 
 	def match_unimod(self, unimod):
@@ -172,6 +174,7 @@ class psmtsv:
 		Perform parsing operations on a PSM entry
 		"""
 		psm_series = self.parse_spectrum(psm_series)
+		psm_series = self.parse_rank(psm_series)
 		psm_series = self.parse_assigned_modifications(psm_series)
 		psm_series = self.parse_protein_and_gene(psm_series, self.decoy_prefix)
 		return psm_series
@@ -180,6 +183,12 @@ class psmtsv:
 		splits = psm_series['Spectrum'].split('.')
 		psm_series['run_id'] = splits[0]
 		psm_series['scan_id'] = int(splits[1])
+		return psm_series
+
+	def parse_rank(self, psm_series):
+		rank_match = re.match(psmtsv.rank_pattern, psm_series['Spectrum File'])
+		if rank_match:
+			psm_series['hit_rank'] = int(rank_match.group())
 		return psm_series
 
 	def parse_assigned_modifications(self, psm_series):
