@@ -970,7 +970,7 @@ class MSCallback:
 	def consumeSpectrum(self, s):
 		self.id_peaks_map.append((s.getNativeID(), s.get_peaks()))
 
-def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, labile_mods):
+def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods):
 	"""
 	Parsing method with psm.tsv as the primary input instead of pepxml/idxml
 	"""
@@ -991,10 +991,10 @@ def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, 
 		theoretical = {}
 		if labile_mods:
 			for modified_peptide, precursor_charge, labile_peptide in psms[['modified_peptide', 'precursor_charge', 'labile_modified_peptide']].drop_duplicates().itertuples(index=False):
-				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits)
 		else:
 			for modified_peptide, precursor_charge, labile_peptide in psms[['modified_peptide', 'precursor_charge']].drop_duplicates().itertuples(index=False):
-				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses)
+				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits)
 	return psms, theoretical
 
 
@@ -1044,7 +1044,7 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 		return pd.DataFrame({'run_id': [], 'scan_id': [], 'hit_rank': [], 'massdiff': [], 'precursor_charge': [], 'retention_time': [], 'ion_mobility': [], 'peptide_sequence': [], 'modifications': [], 'nterm_modification': [], 'cterm_modification': [], 'protein_id': [], 'gene_id': [], 'num_tot_proteins': [], 'decoy': []}), pd.DataFrame({'scan_id': [], 'modified_peptide': [], 'precursor_charge': [], 'precursor_mz': [], 'fragment': [], 'product_mz': [], 'intensity': []})
 
 
-def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, labile_mods):
+def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods):
 	# Parse basename
 	base_name = basename_spectralfile(spectralfile)
 	timestamped_echo("Info: Parsing run %s." % base_name)
@@ -1056,7 +1056,7 @@ def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_d
 	timestamped_echo("Info: Processing spectra from file %s." % spectralfile)
 
 	exe = concurrent.futures.ProcessPoolExecutor(1)
-	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, labile_mods)
+	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods)
 	time.sleep(1)  # allow the process to execute first before using pyOpenMS to read files
 	if spectralfile.lower().endswith(".mzxml"):
 		input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
