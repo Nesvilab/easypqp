@@ -116,7 +116,7 @@ def convert(pepxmlfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_r
 @click.option('--max_psm_pep', default=1, show_default=True, type=float, help='Maximum posterior error probability (PEP) for a PSM')
 @click.option('--decoy_prefix', default='rev_', show_default=True, type=str, required=True, help='Database decoy prefix (required)')
 @click.option('--precision_digits', default=6, show_default=True, type=int, help='Precision (number of digits) for the product m/z reported by the theoretical library generation step. This should match the precision of the downstream consumer of the spectral library. Lowering this number will collapse (more) identical fragment ions of the same precursor to a single value.')
-@click.option('--labile_mods', default=False, show_default=True, required=False, help='Adjust fragment masses of labile modifications (currently O-glycans ONLY)')
+@click.option('--labile_mods', 'labile_mods', default='', show_default=True, required=False, type=str, help='Adjust fragment masses of labile modifications. Supported options: oglyc, nglyc, nglyc+ (includes HexNAc remainder ions)')
 def convertpsm(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_range_str, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods):
     """
     Convert psm.tsv files for EasyPQP
@@ -141,6 +141,11 @@ def convertpsm(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_r
         psmsfile = run_id + ".psmpkl"
     if peaksfile is None:
         peaksfile = run_id + ".peakpkl"
+
+    if labile_mods is not '':
+        if labile_mods not in ['oglyc', 'nglyc', 'nglyc+']:
+            timestamped_echo("Error: Invalid setting for --labile mods: {}. Allowed options are oglyc, nglyc, or nglyc+".format(labile_mods))
+            return 1
 
     temp = exclude_range_str.split(',')
     exclude_range = [float(temp[0]), float(temp[1])]

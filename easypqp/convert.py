@@ -221,10 +221,17 @@ class psmtsv:
 					splits = mod.split('(')
 					location = re.search(r"(\d+)", splits[0]).group(1)
 					modifications += '|{}${}'.format(location, mass)
-					if self.labile_mods:
-						# hard-coding O-glycan rules for now, will change to general implementation later
-						if not(float(mass) > 200 and psm_series['Peptide'][int(location) - 1] in ['S', 'T']):
-							nonlabile_modifications += '|{}${}'.format(location, mass)
+					if self.labile_mods != '':
+						if self.labile_mods == 'oglyc':
+							if not(float(mass) > 140 and psm_series['Peptide'][int(location) - 1] in ['S', 'T']):
+								nonlabile_modifications += '|{}${}'.format(location, mass)
+						elif self.labile_mods == 'nglyc':
+							if not(float(mass) > 140 and psm_series['Peptide'][int(location) - 1] in ['N']):
+								nonlabile_modifications += '|{}${}'.format(location, mass)
+						elif self.labile_mods == 'nglyc+':
+							# hard code HexNAc remainder mass as the modification mass for fragment ions rather than full modification mass
+							if not(float(mass) > 140 and psm_series['Peptide'][int(location) - 1] in ['N']):
+								nonlabile_modifications += '|{}${}'.format(location, 203.07937)
 					else:
 						nonlabile_modifications += '|{}${}'.format(location, mass)
 		psm_series['modifications'] = modifications
@@ -989,7 +996,7 @@ def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, 
 		# Generate theoretical spectra
 		click.echo("Info: Generate theoretical spectra.")
 		theoretical = {}
-		if labile_mods:
+		if labile_mods != '':
 			for modified_peptide, precursor_charge, labile_peptide in psms[['modified_peptide', 'precursor_charge', 'labile_modified_peptide']].drop_duplicates().itertuples(index=False):
 				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits)
 		else:
