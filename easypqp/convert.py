@@ -90,10 +90,10 @@ class psmtsv:
 			# parse terminal modifications
 			nterm_modification = ""
 			if peptide['nterm_modification'] != '':
-				nterm_modification = peptide['nterm_modification'] - 1.0078
+				nterm_modification = peptide['nterm_modification']
 			cterm_modification = ""
 			if peptide['cterm_modification'] != '':
-				cterm_modification = peptide['cterm_modification'] - 18.0153
+				cterm_modification = peptide['cterm_modification']
 
 			# parse closed modifications
 			modifications = {}
