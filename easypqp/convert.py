@@ -39,7 +39,7 @@ class psmtsv:
 							]
 	rank_pattern = re.compile(r"_rank([\d]+)\.pep\.xml")
 
-	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, enable_massdiff, decoy_prefix, labile_mods):
+	def __init__(self, psmtsv_file, unimod, base_name, exclude_range, enable_unannotated, ignore_unannotated, enable_massdiff, decoy_prefix, labile_mods):
 		self.psmtsv_file = psmtsv_file
 		self.base_name = base_name
 		self.decoy_prefix = decoy_prefix
@@ -47,6 +47,7 @@ class psmtsv:
 		self.psms = self.parse_psmtsv()
 		self.exclude_range = exclude_range
 		self.enable_unannotated = enable_unannotated
+		self.ignore_unannotated = ignore_unannotated
 		self.enable_massdiff = enable_massdiff
 		self.match_unimod(unimod)
 
@@ -126,7 +127,9 @@ class psmtsv:
 					record_id = record_id0
 				is_N_term = isinstance(record_id0, tuple) and position in ('Any N-term', 'Protein N-term')
 				if record_id == -1:
-					if self.enable_unannotated:
+					if self.ignore_unannotated:
+						return ''		# set empty modified peptide to ignore with later filtering
+					elif self.enable_unannotated:
 						modified_peptide = "[" + str(round(modifications[site], 6)) + "]" + modified_peptide \
 						if is_N_term else \
 						modified_peptide[:site] + "[" + str(round(modifications[site], 6)) + "]" + modified_peptide[site:]
@@ -143,7 +146,9 @@ class psmtsv:
 					record_id_nterm = um.get_id("N-term", 'Protein N-term', nterm_modification)
 
 				if record_id_nterm == -1:
-					if self.enable_unannotated:
+					if self.ignore_unannotated:
+						return ''		# set empty modified peptide to ignore with later filtering
+					elif self.enable_unannotated:
 						modified_peptide = f'.[{round(nterm_modification, 6)}]{modified_peptide}'
 					else:
 						raise click.ClickException("Error: Could not annotate N-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], nterm_modification))
@@ -156,7 +161,9 @@ class psmtsv:
 					record_id_cterm = um.get_id("C-term", 'Protein C-term', cterm_modification)
 
 				if record_id_cterm == -1:
-					if self.enable_unannotated:
+					if self.ignore_unannotated:
+						return ''		# set empty modified peptide to ignore with later filtering
+					elif self.enable_unannotated:
 						modified_peptide = f'{modified_peptide}.[{round(cterm_modification, 6)}]'
 					else:
 						raise click.ClickException("Error: Could not annotate C-terminus from peptide %s with delta mass %s." % (peptide['peptide_sequence'], cterm_modification))
@@ -168,6 +175,10 @@ class psmtsv:
 		if self.psms.shape[0] > 0:
 			self.psms['modified_peptide'] = self.psms[['peptide_sequence','modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod, 'modifications'), axis=1)
 			self.psms['labile_modified_peptide'] = self.psms[['peptide_sequence','nonlabile_modifications','nterm_modification','cterm_modification','massdiff']].apply(lambda x: match_modifications(x, unimod, 'nonlabile_modifications'), axis=1)
+			if self.ignore_unannotated:
+				pre_size = len(self.psms)
+				self.psms = self.psms[self.psms['modified_peptide'] != '']
+				timestamped_echo("Info: Ignored %s PSMs with modifications not matched to Unimod" % (pre_size - len(self.psms)))
 
 	def parse_psm_info(self, psm_series):
 		"""
@@ -977,13 +988,13 @@ class MSCallback:
 	def consumeSpectrum(self, s):
 		self.id_peaks_map.append((s.getNativeID(), s.get_peaks()))
 
-def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods):
+def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, ignore_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods):
 	"""
 	Parsing method with psm.tsv as the primary input instead of pepxml/idxml
 	"""
 	psmslist = []
 	for psmfile in psm_file_list:
-		px = psmtsv(psmfile, um, base_name, exclude_range, enable_unannotated, enable_massdiff, decoy_prefix, labile_mods)
+		px = psmtsv(psmfile, um, base_name, exclude_range, enable_unannotated, ignore_unannotated, enable_massdiff, decoy_prefix, labile_mods)
 		psms = px.get()
 		rank = re.compile(r'_rank([0-9]+)\.').search(pathlib.Path(psmfile).name)
 		rank_str = '' if rank is None else '_rank' + rank.group(1)
@@ -1051,7 +1062,7 @@ def conversion(pepxmlfile_list, spectralfile, unimodfile, exclude_range, max_del
 		return pd.DataFrame({'run_id': [], 'scan_id': [], 'hit_rank': [], 'massdiff': [], 'precursor_charge': [], 'retention_time': [], 'ion_mobility': [], 'peptide_sequence': [], 'modifications': [], 'nterm_modification': [], 'cterm_modification': [], 'protein_id': [], 'gene_id': [], 'num_tot_proteins': [], 'decoy': []}), pd.DataFrame({'scan_id': [], 'modified_peptide': [], 'precursor_charge': [], 'precursor_mz': [], 'fragment': [], 'product_mz': [], 'intensity': []})
 
 
-def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods):
+def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_delta_unimod, max_delta_ppm, enable_unannotated, ignore_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods):
 	# Parse basename
 	base_name = basename_spectralfile(spectralfile)
 	timestamped_echo("Info: Parsing run %s." % base_name)
@@ -1063,7 +1074,7 @@ def conversion_psm(psm_file_list, spectralfile, unimodfile, exclude_range, max_d
 	timestamped_echo("Info: Processing spectra from file %s." % spectralfile)
 
 	exe = concurrent.futures.ProcessPoolExecutor(1)
-	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods)
+	psms_fut = exe.submit(parse_psms, psm_file_list, um, base_name, exclude_range, enable_unannotated, ignore_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, decoy_prefix, precision_digits, labile_mods)
 	time.sleep(1)  # allow the process to execute first before using pyOpenMS to read files
 	if spectralfile.lower().endswith(".mzxml"):
 		input_map = get_map_mzml_or_mzxml(spectralfile, 'mzxml')
