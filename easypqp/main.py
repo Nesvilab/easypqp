@@ -125,7 +125,13 @@ def convertpsm(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_r
     """
     Convert psm.tsv files for EasyPQP
     """
+    convertpsm_core(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_range_str, max_delta_unimod, max_delta_ppm, enable_unannotated, ignore_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods, max_glycan_q)
 
+
+def convertpsm_core(psmfile, spectralfile, unimodfile, psmsfile, peaksfile, exclude_range_str, max_delta_unimod, max_delta_ppm, enable_unannotated, ignore_unannotated, enable_massdiff, fragment_types, fragment_charges, enable_specific_losses, enable_unspecific_losses, max_psm_pep, decoy_prefix, precision_digits, labile_mods, max_glycan_q):
+    """
+    runner for debugging
+    """
     start_time = time.time()
 
     psmfile_list = []
