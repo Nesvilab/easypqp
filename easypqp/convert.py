@@ -61,10 +61,13 @@ class psmtsv:
 		psms = pd.read_csv(self.psmtsv_file, index_col=False, sep='\t', usecols=lambda col: col in set(psmtsv.relevant_psm_columns))
 
 		psms = psms.apply(self.parse_psm_info, axis=1)
-		if self.max_glycan_q != 1:
-			if "Glycan q-value" in psms.columns:
-				psms = psms[(psms['Glycan q-value'] < self.max_glycan_q) | (psms['Glycan q-value'].isnull())]		# include null to include non-glyco peptides
-			else:
+		psms['is_glycopep'] = False
+		if "Glycan q-value" in psms.columns:
+			if self.max_glycan_q != 1:
+				psms = psms[(psms['Glycan q-value'] < self.max_glycan_q) | (psms['Glycan q-value'].isnull())]  # include null to include non-glyco peptides
+			psms['is_glycopep'] = pd.notna(psms['Glycan q-value'])
+		else:
+			if self.max_glycan_q != 1:
 				timestamped_echo("Warning: glycan q-value filtering requested, but PSM table does not contain the Glycan q-value column. No filtering performed")
 		psms = psms.rename(columns={'Charge': 'precursor_charge',
 									'Retention': 'retention_time',
@@ -877,7 +880,7 @@ def annotate_mass_spectrum_numba(ionseries, max_delta_ppm, spectrum):
 	return ions[idx_ions[idx_peaks]], ion_masses[idx_ions[idx_peaks]], intensities0[idx_peaks]
 
 
-def generate_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2,3,4], fragment_types=['b','y'], enable_specific_losses = False, enable_unspecific_losses = False, precision_digits = 6):
+def generate_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2,3,4], fragment_types=['b','y'], enable_specific_losses = False, enable_unspecific_losses = False, precision_digits = 6, is_glycopep=False, generate_glycan_y_ions=False):
 	peptide = po.AASequence.fromString(po.String(peptide_sequence))
 	sequence = peptide.toUnmodifiedString()
 
@@ -890,6 +893,8 @@ def generate_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2
 	# unspecific_losses["H4COS"] = 63.9983
 
 	fragments = {}
+	if is_glycopep and generate_glycan_y_ions:
+		fragments.update(generate_glycan_y_ionseries(peptide_sequence, precursor_charge, fragment_charges, precision_digits))
 
 	for fragment_type in fragment_types:
 		for fragment_charge in fragment_charges:
@@ -916,7 +921,7 @@ def generate_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2
 						mass = ion.getMonoWeight(po.Residue.ResidueType.ZIon, fragment_charge) / fragment_charge;
 					else:
 						raise RuntimeError(f'fragment type "{fragment_type}" is not in (a,b,c,x,y,z)')
-					
+
 					# Workaround
 					# If two fragment ions have identical product m/z, this can lead to annotation inconsistencies.
 					# E.g. .(UniMod:1)ADQLTEEQIAEFK+2 and the corresponding b5^1 and b10^2 ions.
@@ -950,6 +955,27 @@ def generate_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2
 	# flip key - values for workaround
 	fragments = {value: key for key, value in fragments.items()}
 	return np.array(list(fragments.keys())), np.fromiter(fragments.values(), float, len(fragments))
+
+
+def generate_glycan_y_ionseries(peptide_sequence, precursor_charge, fragment_charges=[1,2,3,4], precision_digits=6):
+	Y_masses = {1: 203.07937, 2: 406.15874, 3: 568.21156, 4: 730.26438, 5: 892.31722, 6: 1054.37004, 7: 1216.42288, 8: 1378.47570, 9: 1540.52852, 10: 1702.58136, 11: 1864.63418} #, 12:2026.68702, 13:2188.73984, 14:2350.79266, 15:2512.84550, 16:2674.89832}
+	proton_mass = 1.007276
+
+	fragments = {}
+	peptide = po.AASequence.fromString(po.String(peptide_sequence))
+
+	sequence = peptide.toUnmodifiedString()
+	peptide2 = po.AASequence.fromString(sequence)
+	pep_mass = peptide2.getMonoWeight()
+	for Y_num, Y_mass in Y_masses.items():
+		mass = pep_mass + Y_mass
+		for fragment_charge in fragment_charges:
+			if fragment_charge <= precursor_charge:
+				k = round((mass + fragment_charge * proton_mass) / float(fragment_charge), precision_digits)
+				if k not in fragments:
+					fragments[k] = 'y' + str(Y_num + len(sequence)) + "^" + str(fragment_charge)  # DIA-NN does not accept "Y" as fragment type, so make it y of greater than peptide length
+	return fragments
+
 
 def parse_pepxmls(pepxmlfile_list, um, base_name, exclude_range, enable_unannotated, enable_massdiff, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits):
 	psmslist = []
@@ -1011,14 +1037,18 @@ def parse_psms(psm_file_list, um, base_name, exclude_range, enable_unannotated, 
 		click.echo(f"Info: Done parsing psm.tsv: {psmfile}")
 		psmslist.append(psms)
 	psms = pd.concat(psmslist)
+	generate_glycan_y_ions = 'Y' in fragment_types
+	if 'Y' in fragment_types:
+		fragment_types.remove('Y')
+
 	theoretical = None
 	if psms.shape[0] > 0:
 		# Generate theoretical spectra
 		click.echo("Info: Generate theoretical spectra.")
 		theoretical = {}
 		if labile_mods != '':
-			for modified_peptide, precursor_charge, labile_peptide in psms[['modified_peptide', 'precursor_charge', 'labile_modified_peptide']].drop_duplicates().itertuples(index=False):
-				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits)
+			for modified_peptide, precursor_charge, labile_peptide, is_glycopep in psms[['modified_peptide', 'precursor_charge', 'labile_modified_peptide', 'is_glycopep']].drop_duplicates().itertuples(index=False):
+				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(labile_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits, is_glycopep, generate_glycan_y_ions)
 		else:
 			for modified_peptide, precursor_charge in psms[['modified_peptide', 'precursor_charge']].drop_duplicates().itertuples(index=False):
 				theoretical.setdefault(modified_peptide, {})[precursor_charge] = generate_ionseries(modified_peptide, precursor_charge, fragment_charges, fragment_types, enable_specific_losses, enable_unspecific_losses, precision_digits)
