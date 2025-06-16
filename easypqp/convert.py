@@ -973,7 +973,7 @@ def generate_glycan_y_ionseries(peptide_sequence, precursor_charge, fragment_cha
 			if fragment_charge <= precursor_charge:
 				k = round((mass + fragment_charge * proton_mass) / float(fragment_charge), precision_digits)
 				if k not in fragments:
-					fragments[k] = 'y' + str(Y_num + len(sequence)) + "^" + str(fragment_charge)  # DIA-NN does not accept "Y" as fragment type, so make it y of greater than peptide length
+					fragments[k] = 'Y' + str(Y_num) + "^" + str(fragment_charge)
 	return fragments
 
 
