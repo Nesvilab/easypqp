@@ -973,7 +973,8 @@ def generate_glycan_y_ionseries(peptide_sequence, precursor_charge, fragment_cha
 			if fragment_charge <= precursor_charge:
 				k = round((mass + fragment_charge * proton_mass) / float(fragment_charge), precision_digits)
 				if k not in fragments:
-					fragments[k] = 'Y' + str(Y_num) + "^" + str(fragment_charge)
+					# fragments[k] = 'Y' + str(Y_num) + "^" + str(fragment_charge)
+					fragments[k] = 'y3' + "^" + str(fragment_charge)
 	return fragments
 
 
